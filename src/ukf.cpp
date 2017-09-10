@@ -52,18 +52,6 @@ UKF::UKF() {
   Hint: one or more values initialized above might be wildly off...
   */
 
-
-  R_laser_ = MatrixXd(2, 2);
-  R_laser_ << pow(std_laspx_, 2), 0,
-        0, pow(std_laspy_, 2);
-  
-  R_radar_ = MatrixXd(3, 3);
-  R_radar_ << pow(std_radr_, 2), 0, 0,
-        0, pow(std_radphi_, 2), 0,
-        0, 0, pow(std_radrd_, 2);
-
-  time_us_ = 0;
-  
   //set state dimension
   n_x_ = 5;
 
@@ -85,14 +73,25 @@ UKF::UKF() {
   //Set weights
   weights_(0) = lambda_ / (lambda_ + n_aug_);
 
-  for (int i = 1; i < n_sig_; i++)
-  {
+  for (int i = 1; i < n_sig_; i++){
     weights_(i) = 0.5 / (n_aug_ + lambda_);
   }
   
   H_ = MatrixXd(2, n_x_);
   H_ << 1, 0, 0, 0, 0,
         0, 1, 0, 0, 0;
+
+  R_radar_ = MatrixXd(3, 3);
+  R_radar_ << pow(std_radr_, 2), 0, 0,
+        0, pow(std_radphi_, 2), 0,
+        0, 0, pow(std_radrd_, 2);
+        
+  R_laser_ = MatrixXd(2, 2);
+  R_laser_ << pow(std_laspx_, 2), 0,
+        0, pow(std_laspy_, 2);
+  
+  previous_timestamp_ = 0;
+  
 }
 
 UKF::~UKF() {}
@@ -109,35 +108,27 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   measurements.
   */
 
-  if(!is_initialized_)
-  {
-    if(meas_package.sensor_type_ == MeasurementPackage::RADAR)
-    {
-      double rho = meas_package.raw_measurements_[0];
-      double phi = meas_package.raw_measurements_[1];
-
-      x_ << rho*cos(phi), rho*sin(phi), 0, 0, 0;
-    }
-    else if (meas_package.sensor_type_ == MeasurementPackage::LASER)
-    {
+  if(!is_initialized_){
+    if(meas_package.sensor_type_ == MeasurementPackage::RADAR){
+      x_ << meas_package.raw_measurements_[0]*cos(meas_package.raw_measurements_[1]), 
+      meas_package.raw_measurements_[0]*sin(meas_package.raw_measurements_[1]), 
+      0, 0, 0;
+    } else if (meas_package.sensor_type_ == MeasurementPackage::LASER){
       x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;  
     }
 
     is_initialized_ = true;
-    time_us_ = meas_package.timestamp_;
+    previous_timestamp_ = meas_package.timestamp_;
   }
 
-  double dt = (meas_package.timestamp_ - time_us_) / 1000000.0;
-  time_us_ = meas_package.timestamp_;
+  double dt = (meas_package.timestamp_ - previous_timestamp_) / 1000000.0;
+  previous_timestamp_ = meas_package.timestamp_;
   
   Prediction(dt);
 
-  if(meas_package.sensor_type_ == MeasurementPackage::RADAR) 
-  {
+  if(meas_package.sensor_type_ == MeasurementPackage::RADAR){
     UpdateRadar(meas_package);
-  } 
-  else if (meas_package.sensor_type_ == MeasurementPackage::LASER) 
-  {
+  } else if (meas_package.sensor_type_ == MeasurementPackage::LASER){
     UpdateLidar(meas_package);
   }
 }
@@ -181,15 +172,13 @@ void UKF::Prediction(double delta_t) {
   //set the first column of sigma point matrix
   Xsig_aug.col(0)  = x_aug;
   //set remaining sigma points
-  for (int i = 0; i< n_aug_; i++)
-  {
+  for (int i = 0; i< n_aug_; i++){
     Xsig_aug.col(i + 1) = x_aug + sqrt(lambda_ + n_aug_) * L.col(i);
     Xsig_aug.col(i + 1 + n_aug_) = x_aug - sqrt(lambda_ + n_aug_) * L.col(i);
   }
   
   // Predict sigma points
-  for (int i = 0; i < 2 * n_aug_ + 1; i++)
-  {
+  for (int i = 0; i < 2 * n_aug_ + 1; i++){
     // Extract values for better readability
     double p_x = Xsig_aug(0,i);
     double p_y = Xsig_aug(1,i);
@@ -203,13 +192,10 @@ void UKF::Prediction(double delta_t) {
     double px_p, py_p;
 
     // Avoid division by zero
-    if (fabs(yawd) > 0.001) 
-  {
+    if (fabs(yawd) > 0.001){
         px_p = p_x + v/yawd * (sin (yaw + yawd * delta_t) - sin(yaw));
         py_p = p_y + v/yawd * (cos(yaw) - cos(yaw + yawd * delta_t) );
-    }
-    else 
-  {
+    } else {
         px_p = p_x + v * delta_t * cos(yaw);
         py_p = p_y + v * delta_t * sin(yaw);
     }
@@ -269,10 +255,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the lidar NIS.
   */
-
-  // The following are mostly borrowed from my EKF implementation.
   VectorXd z_pred = H_ * x_;
-  
   VectorXd z = meas_package.raw_measurements_;
   VectorXd y = z - z_pred;
   MatrixXd Ht = H_.transpose();
