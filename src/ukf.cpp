@@ -60,7 +60,7 @@ UKF::UKF() {
   
   is_initialized_ = false;
   
-  int n_sig_ = 2*n_aug_ + 1;
+  n_sig_ = 2*n_aug_ + 1;
 
   Xsig_pred_ = MatrixXd(n_x_, n_sig_);
 
@@ -71,11 +71,8 @@ UKF::UKF() {
   weights_ = VectorXd(n_sig_);
   
   //Set weights
-  weights_(0) = lambda_ / (lambda_ + n_aug_);
-
-  for (int i = 1; i < n_sig_; i++){
-    weights_(i) = 0.5 / (n_aug_ + lambda_);
-  }
+  weights_.fill(0.5 / (lambda_ + n_aug_));
+  weights_(0) = lambda_/(lambda_ + n_aug_);
   
   H_ = MatrixXd(2, n_x_);
   H_ << 1, 0, 0, 0, 0,
@@ -178,7 +175,7 @@ void UKF::Prediction(double delta_t) {
   }
   
   // Predict sigma points
-  for (int i = 0; i < 2 * n_aug_ + 1; i++){
+  for (int i = 0; i < n_sig_; i++){
     // Extract values for better readability
     double p_x = Xsig_aug(0,i);
     double p_y = Xsig_aug(1,i);
@@ -221,15 +218,11 @@ void UKF::Prediction(double delta_t) {
   }
   
   // Predict state mean
-  x_.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; i++){  
-    // Iterate over sigma points
-    x_ = x_ + weights_(i) * Xsig_pred_.col(i);
-  }
+  x_ = Xsig_pred_ * weights_;
 
   // Predicted state covariance matrix
   P_.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; i++){  
+  for (int i = 0; i < n_sig_; i++){  
     // Iterate over sigma points
 
     // State difference
@@ -286,21 +279,30 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   You'll also need to calculate the radar NIS.
   */
   int n_z_ = 3; 
-  MatrixXd Zsig = MatrixXd(n_z_, 2 * n_aug_ + 1);
+  double eps = 0.00000001;
+
+  MatrixXd Zsig = MatrixXd(n_z_, n_sig_);
   //transform sigma points into measurement space
   for(int i=0; i<Xsig_pred_.cols(); ++i){
     double p_x = Xsig_pred_(0,i);
     double p_y = Xsig_pred_(1,i);
     double v  = Xsig_pred_(2,i);
     double yaw = Xsig_pred_(3,i);
-
+    
     double v1 = cos(yaw)*v;
     double v2 = sin(yaw)*v;
 
     // measurement model
-    Zsig(0,i) = sqrt(p_x*p_x + p_y*p_y);                        //r
-    Zsig(1,i) = atan2(p_y,p_x);                                 //phi
-    Zsig(2,i) = (p_x*v1 + p_y*v2 ) / sqrt(p_x*p_x + p_y*p_y);   //r_dot
+    Zsig(0,i) = sqrt(p_x*p_x + p_y*p_y);               //r
+    Zsig(1,i) = atan2(p_y,p_x);                        //phi
+    if (fabs(Zsig(0,i)) > eps) {
+      Zsig(1,i) = atan2(p_y,p_x);                        //phi
+      Zsig(2,i) = (p_x*v1 + p_y*v2 ) / Zsig(0,i);      //r_dot
+    }
+    else {
+      Zsig(1,i) = 0.0;
+      Zsig(2,i) = 0.0;
+    }
   
   }
 
@@ -326,7 +328,7 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   // Calculate the cross-correlation matrix
   MatrixXd Tc = MatrixXd(n_x_, n_z_);
   Tc.fill(0.0);
-  for(int i=0;i<2 * n_aug_ + 1; ++i){
+  for(int i=0;i<n_sig_; ++i){
     VectorXd diff_x = (Xsig_pred_.col(i) - x_);
   
     while (diff_x(3)> M_PI) diff_x(3)-=2.*M_PI;
